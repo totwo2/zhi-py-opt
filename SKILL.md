@@ -17,6 +17,14 @@ read_when:
   - 写或优化会被反复调用的 Python 函数/脚本时
   - 想让重复劳动自动变快、变可验证
   - 维护一批域级优化模板并希望它能自我生长
+license: MIT
+tags:
+  - python
+  - optimization
+  - profiling
+  - ast
+  - self-improving
+allowed-tools: "Read Write Edit Bash Glob Grep WebFetch WebSearch Skill Agent"
 ---
 
 # selfopt — 自优化种子包
