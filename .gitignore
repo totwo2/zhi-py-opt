@@ -1,0 +1,14 @@
+# Local optimization library (grows per user, not shared)
+data/library.jsonl
+data/candidates.jsonl
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# SkillHub metadata
+_meta.json
+
+# OS
+.DS_Store
