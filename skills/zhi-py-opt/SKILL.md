@@ -1,266 +1,131 @@
 ---
-name: zhi-py-opt
-slug: zhi-py-opt
-version: 2.0.1
-displayName: Smart Python Optimizer
-summary: "AI agent self-optimizing seed pack: LLM generates rewrites + programmatic validation gates. Library grows with user workload."
-description: |
-  An AI agent self-optimization toolkit. LLM identifies hot Python functions, generates faster equivalents, and a validation gate verifies equivalence before admitting them into a reusable library. The library grows automatically with each task. Includes AST-based static analyzer, runtime profiler, and interactive scan hooks.
-  Triggers: optimize python, speed up script, analyze hot functions, auto-scan python, self-optimize.
-  AI 智能体自优化种子包：LLM 生成重写 + 程序把关入库，库随用户负载生长。包含 AST 静态分析器、运行时 profiler、交互式扫描钩子。
-  触发词：优化python、加速脚本、分析热点函数、自动扫描、自优化
+name: selfopt
+slug: selfopt
+displayName: AI 智能体自优化
+summary: "LLM 生成重写，程序用真证人 + 配对实测把关；过不了验证不许入库、不许改源码"
+description: >
+  AI 说"这样改会更快"——selfopt 把这句话拉到真机上验证：真证人查等价性（含边界与非法输入，
+  失败直接返回首个反例）、配对交替实测查加速比 + 统计检验，双条件都过才入库。
+  Python 热点可实测；ts/js/go/java/c/cs/rb/php/rs/sh 等 10 种语言只报形态、不背书任何加速比。
+  触发词：selfopt、自优化、代码优化验证、AI 改的代码靠谱吗、验证优化建议、
+  python 提速、脚本优化、热点扫描、优化会不会改错
 agent_created: true
+version: 2.1.0
 read_when:
-  - Writing or optimizing repeatedly-called Python functions/scripts
-  - Wanting repetitive work to auto-accelerate and be verifiable
-  - Maintaining domain-level optimization templates that self-grow
-  - 写或优化会被反复调用的 Python 函数/脚本时
-  - 想让重复劳动自动变快、变可验证
-  - 维护一批域级优化模板并希望它能自我生长
-license: MIT
-tags:
-  - python
-  - optimization
-  - profiling
-  - ast
-  - self-improving
-allowed-tools: "Read Write Edit Bash Glob Grep WebFetch WebSearch Skill Agent"
+  - AI/同事/你自己给出一段"更快"的重写，需要确认它没改错、真的更快
+  - 要扫描本地代码库找可优化热点（Python 及 10 种其他语言）
+  - 想让 agent 每次写完代码自动过一遍优化验证，库随负载生长
+  - 遇到已知域覆盖不到的优化模式（成长机制触发点：必须去长域，不许只报"无优化"就结束）
+allowed-tools:
+  - Read
+  - Grep
+  - Glob
+  - Bash（仅限运行本 skill 目录下脚本的只读与验证命令）
 ---
 
-# zhi-py-opt — Smart Python Optimizer
+# selfopt — AI 智能体自优化
 
-> AI 智能体自优化种子包：LLM 生成重写 + 程序把关入库，库随用户负载生长。
+LLM 负责生成更快的重写，本模块负责**验证与计分**：真证人查等价性、配对实测查加速比，双条件都过才入库。
+**核心价值是防错，不是提速** —— 生成可以出错，验证不能缺席。
+只标热点 + 把关，**绝不未经 `adopt` 验证就改写源码**。
 
----
-
-## 1. 触发词（命中即启动）
-
-| 用户说法 | 意图 | 入口 |
-|---------|------|------|
-| "优化python" / "加速脚本" / "speed up" | 优化Python代码 | selfopt 模块 |
-| "分析热点函数" / "找出慢的地方" | 静态/运行时分析 | scripts/analyzer.py / profiler.py |
-| "自动扫描" / "auto-scan" | 自动扫描代码库 | selfopt.auto_scan() |
-| "自优化" / "self-optimize" | 自动优化并入库 | 完整流程 |
-| "跑一下优化" / "看看能不能更快" | 执行优化流程 | 完整流程 |
-
-**注意**：触发词不限于上述 exact match，用户表达类似意图也应启动。
-
----
-
-## 2. 核心流程（Agent 执行手册）
-
-### 2.1 标准优化流程
-
-```
-用户提供代码/路径
-  → 1. 分析器扫描（scripts/analyzer.py）
-  → 2. Profiler 验证（scripts/profiler.py，可选）
-  → 3. LLM 生成重写版本
-  → 4. adopt() 验证等价性
-  → 5. 入库（data/library.jsonl）或记入候选池（data/candidates.jsonl）
-  → 6. 向用户报告结果
-```
-
-**详细步骤**：
-
-1. **接收输入**
-   - 用户提供 Python 文件路径或代码片段
-   - 如果用户提供片段，先写入临时文件
-
-2. **分析热点**
-   ```bash
-   python scripts/analyzer.py <file.py> --high
-   ```
-   - 输出：热点函数列表（函数名、行号、建议域、置信度）
-   - 如果输出为空，告知用户"未发现明显热点"
-
-3. **生成优化版本**
-   - 对每个热点，LLM 根据 domains.json 中的 recipe 生成更快版本
-   - 参考 `rewrite_template` 和 `pitfall` 字段
-
-4. **验证入库**
-   ```python
-   import sys; sys.path.insert(0, "<skill>/scripts")
-   import selfopt
-   
-   ok = selfopt.adopt("fn_name", old_fn, new_fn, "domain_id")
-   ```
-   - `ok["ok"] == True` → 已入库，告知用户
-   - `ok["ok"] == False` → 验证失败，查看 `ok["stage"]` 和 `ok["note"]`，告知用户原因
-
-5. **报告**
-   - 成功：显示优化前/后对比、速度提升
-   - 失败：说明失败原因（等价性不过、速度不达标等）
-
-### 2.2 自动扫描模式
+## 用法
 
 ```bash
-# 扫描当前目录
-python scripts/selfopt-hook.py
-
-# 友好交互模式
-python scripts/selfopt-hook.py --ask
+# 安装：放到 agent 的 skills 目录即可（纯标准库，无需 pip install）
+# 也可以克隆到任意目录，把 scripts/ 加进 sys.path 就行
+git clone https://github.com/totwo2/selfopt.git ~/.workbuddy/skills/selfopt
 ```
 
-**Agent 操作**：
-1. 执行 `python scripts/selfopt-hook.py --ask`
-2. 解析输出，识别用户选择
-3. 对选中的热点执行优化流程
-4. 将结果写回报告
-
-### 2.3 批量分析模式
-
-```bash
-# 分析单个文件
-python scripts/analyzer.py file.py
-
-# 分析多个文件
-for f in $(find . -name "*.py"); do
-    python scripts/analyzer.py "$f" --high
-done
-```
-
----
-
-## 3. 脚本参考
-
-| 脚本 | 用途 | 调用方式 |
-|------|------|---------|
-| `scripts/selfopt.py` | 主模块，含 adopt/benchmark/growth | `python scripts/selfopt.py` |
-| `scripts/analyzer.py` | AST 静态扫描热点 | `python scripts/analyzer.py <file> [--high]` |
-| `scripts/profiler.py` | 运行时采样热点 | `python scripts/profiler.py <file> [--threshold 1.0]` |
-| `scripts/selfopt-hook.py` | 自动扫描触发器 | `python scripts/selfopt-hook.py [--ask]` |
-
-### 3.1 scripts/selfopt.py
-
-```bash
-python scripts/selfopt.py            # 跑内置 demo
-python scripts/selfopt.py report     # 看库里有什么、候选池有什么
-python scripts/selfopt.py scan       # 自动扫描当前目录
-```
-
-**Python API**：
 ```python
-import sys; sys.path.insert(0, "<skill>/scripts")
+import sys, os
+sys.path.insert(0, os.path.expanduser("~/.workbuddy/skills/selfopt/scripts"))
 import selfopt
 
-# 验证并入库
-ok = selfopt.adopt("fn_name", old_fn, new_fn, "domain_id")
+# 1) 找热点
+for fd in selfopt.analyze_file("your_script.py"):
+    print(fd["function"], fd["domain"], fd["line"], fd["hint"])
 
-# 查看候选池
-selfopt.growth_signals()
-
-# 添加新域
-selfopt.add_domain(entry)
-
-# 重载域库
-selfopt.reload_domains()
+# 2) 你生成 faster_fn，由 selfopt 决定要不要
+ok = selfopt.adopt("my_hot_fn", old_fn, new_fn, "str-join")
+# ok["ok"] = True  → 入库，带实测加速比与统计背书
+# ok["ok"] = False → 看 ok["stage"]（verify / perf / domain）与 ok["note"]、ok["counterexample"]
 ```
 
-### 3.2 scripts/analyzer.py
+| 目的 | 命令 |
+|---|---|
+| **装完先跑这个（自测）** | `python3 scripts/selfopt.py selftest` → 6 PASS |
+| 多语言扫描器自测 | `python3 scripts/polyglot.py --test` → 11 PASS |
+| 看内置演示（含验证拒绝错误重写） | `python3 scripts/selfopt.py` |
+| 看库里有什么 / 候选池有什么 | `python3 scripts/selfopt.py report` |
+| 全语言全量扫描 + 分布汇总 | `python3 scripts/selfopt.py sweep <root>` |
+| 交互式：问目标 → 扫 → 问优化哪几个 | `python3 scripts/selfopt.py scan` |
+| 静态扫 `.py`（AST + 类型推断） | `python3 scripts/analyzer.py file.py` |
+| 静态扫非 Python 文件 | `python3 scripts/polyglot.py file.ts` |
+| 真实负载实测各域值多少 | `python3 scripts/bench_real.py`（自证：`--test`） |
+| 把扫出的热点逐条过验证 | `python3 scripts/batch_adopt.py [N]` |
+| 自动触发（挂宿主钩子） | `python3 scripts/selfopt-hook.py`（交互版 `--ask`） |
+| 域覆盖不到时立新域 | `selfopt.add_domain(entry)` + `selfopt.reload_domains()` |
+| 看候选池/成长信号 | `selfopt.growth_signals()` |
 
-```bash
-python scripts/analyzer.py your_script.py              # 全量（含 low 置信）
-python scripts/analyzer.py your_script.py --high       # 仅 high 置信
-```
+**装完验证**：`python3 scripts/selfopt.py selftest` 必须 6 PASS，失败说明环境或包有问题。
 
-**输出格式**：
-```
-L122 [list-to-set-membership/high] fetch_toc: 右值为列表且循环内不变，转 set 后 in 由 O(n)→O(1)
-```
+## 怎么选
 
-**支持检测的域**：
-- `str-join`：循环内字符串 +=
-- `regex-precompile`：函数内 re.compile
-- `list-to-set-membership`：循环内 `x in list`
-- `dict-dispatch`：3+ elif 长链
+只问一件事：**这段重写能构造出成对的、可调用的函数吗？**
 
-**盲区**（需 LLM/人工判断）：
-- `sort-small-net`
-- `lru-cache-pure`
+| 情况 | 走法 |
+|---|---|
+| Python 函数，能构造 old/new 两个可调用对象 | → `adopt()` 过验证，拿带统计背书的结论 |
+| 非 Python 语言（ts/js/go/java/c/cs/rb/php/rs/sh…） | → 只能扫形态，`gate="unverified"`，**不许给加速比** |
+| 依赖跨模块/第三方对象，构造不出来 | → 别硬套。用 `bench_real.py` 按真实负载测，或跳过 |
 
-### 3.3 scripts/profiler.py
+每条发现带 `gate`，**读它，再决定能不能谈数字**：`gate="python"` 能进 `adopt` 实测；
+`gate="unverified"` 只有形态信号，**selfopt 不为它背书任何加速比**（非 Python 代码无法在 Python 进程里构造成对可调用对象，硬套就是编数字）。
 
-```bash
-python scripts/profiler.py your_script.py                    # 跑脚本，输出热点
-python scripts/profiler.py your_script.py --threshold 1.0   # 阈值 1%，更全
-python scripts/profiler.py -m your_module --args arg1 arg2   # 跑模块
-```
+种子域 6 个：`str-join`、`regex-precompile`、`list-to-set-membership`、`dict-dispatch`、`sort-small-net`、`lru-cache-pure`。
+`domains.json` 是普通 JSON，可直接编辑追加。
 
-**输出格式**：
-```
-累计%    自身ms    调用次数  函数  [建议域]
- 12.3%     8.10ms        1  fetch_toc()  [list-to-set-membership]
-  5.7%     3.45ms      120  compile()  [regex-precompile]
-```
+## 成长机制（域覆盖不到时必须走，不许只报"无优化"就结束）
 
-### 3.4 scripts/selfopt-hook.py
+种子域只有 6 个，**一定覆盖不到所有模式**。覆盖不到不是"没活干"，是"该长新域了"。
 
-```bash
-python scripts/selfopt-hook.py             # 自动扫描当前目录
-python scripts/selfopt-hook.py --ask       # 友好交互模式
-```
+触发条件（任一）：`adopt` 返回 `{"stage":"domain","note":"未知域..."}`；或你想优化的模式不属于上述 6 域；
+或 `auto_scan` 返回 0 信号但你读代码后识别出可优化模式。
 
-**交互流程**：
-1. 问用户：有目标还是全量？
-2. 扫描热点
-3. 问用户：要优化哪几个？
-4. 对选中的执行 adopt()
+必做动作：
+1. 起一个描述性 `domain_id`（如 `io-parse-cache`、`json-memo`）；
+2. 生成一个**真能过验证**的等价重写，用新 `domain_id` 调 `adopt` 进候选池；
+3. 该重写真能过 → **当场** `add_domain(entry)`（`scenario` / `witness` / `rewrite_hint` 三件套缺一不可）+ `reload_domains()`。**立域不等 3 次，当场就立。**
 
----
+⚠️ **0 信号 ≠ 无优化**：静态 analyzer 只能检测 4 类（`str-join` / `regex-precompile` / `list-to-set-membership` / `dict-dispatch`），
+`sort-small-net`、`lru-cache-pure` 和长出的新域它扫不到。0 信号时必须主动研判代码。
 
-## 4. 错误处理
+## 三条会污染库的坑（照做）
 
-| 错误 | 原因 | 处理 |
-|------|------|------|
-| `adopt` 返回 `ok=False` | 等价性验证失败 | 告知用户，不修改源码 |
-| `adopt` 返回 `ok=False` | 速度不达标 | 告知用户，不修改源码 |
-| 分析器无输出 | 未发现明显热点 | 告知用户"代码已较优，无需优化" |
-| Profiler 超时 | 脚本执行时间过长 | 降低 `--threshold` 或缩短样本 |
-| 样本不足 | benchmark 样本数不够 | 按 domains.json 的 `benchmark_min_n` 补充样本 |
+1. **`list-to-set-membership` 的样本禁用集合字面量**（`x in {"a","b","c"}`）：CPython 3.2+ 会在编译期折叠成 `frozenset` 常量，
+   微基准报出**虚假加速**。要用运行时变量列表（如 `lst = list(range(8))`）。真正的优化是把 `set(...)` 提到循环外只建一次。
+2. **样本要代表真实规模**：加速比依赖输入大小，样本太小过不了门槛，把划算的优化误杀。
+3. **传自定义 `samples=` 时，边界由调用方负责**：传了就跳过域的默认证人（含边界样本），必须自己带空/极值/非法形态。
 
----
+## 适用边界（什么时候别用）
 
-## 5. 设计约束
+- **非 Python 语言**：只报形态，不给加速比（`gate="unverified"`）。
+- **Python 3.13+ 的 `dict-dispatch` 默认不值得重写**：自适应特化后 elif 链已被优化好，实测重写普遍倒退。
+- **依赖 BaseModel / asyncio / logger 等不可静态重建的函数**：构造不出证人，给不出结论，别硬跑。
+- **别拿静态热点条数推断收益**：实测 2297 文件 → 1018 热点 → 92 条可验证 → **通过 0 条**。条数 ≠ 收益。
+- **不替代 profiler**：不做运行时采样、不做 monkey-patch。
 
-- 仅依赖标准库，单文件，任何 Python 系 Agent 都能直接 `import`
-- 不做运行时 monkey-patch：入库的是**记录与证明**，是否应用到源码由 Agent 决定
-- 不信任任何未验证的优化：`adopt` 是唯一闸门
-- 绝不未经 `adopt` 验证就改写源码
+## 环境变量
 
----
+| 变量 | 作用 |
+|---|---|
+| `SELFOPT_SCAN_ROOT` | hook 脚本传给 `auto_scan()` 的扫描根目录，默认 cwd |
+| `SELFOPT_DATA_DIR` | 把库/候选写到别处（测试用 `/tmp/xxx`，避免污染真实库） |
 
-## 6. 数据文件
+## 验证做了什么（结论；统计细节见 `docs/math-gate.md`）
 
-| 文件 | 用途 |
-|------|------|
-| `domains.json` | 预置域配方（trigger_patterns、rewrite_template、pitfall、benchmark_min_n） |
-| `data/library.jsonl` | 已验证通过的优化记录（用户私有，不随包发布） |
-| `data/candidates.jsonl` | 待验证候选（用户私有，不随包发布） |
-
-**注意**：`data/` 目录不随包发布，用户库随用户负载生长。
-
----
-
-## 7. 快速命令参考
-
-```bash
-# 扫描热点
-python scripts/analyzer.py file.py --high
-python scripts/profiler.py file.py --threshold 1.0
-
-# 自动扫描
-python scripts/selfopt-hook.py --ask
-
-# 验证优化
-python -c "
-import sys; sys.path.insert(0, 'scripts')
-import selfopt
-ok = selfopt.adopt('fn_name', old_fn, new_fn, 'domain_id')
-print(ok)
-"
-```
-
----
-
-*最后更新：2026-08-11*
+1. **等价性**：随机 + 边界混合证人；两者抛同类型异常也算等价（不误杀合法重写）；失败返回首个反例，一次改对。
+2. **性能**：同轮内 old/new 交替测量（控环境漂移）+ 抗异常值的加速比估计 + 统计检验，双条件都过才入库。
+3. **版本感知**：记录 `py_version`，旧版本记录提示可能已失效（3.13+ 特化会吃掉传统技巧收益）。
+4. **作废机制**：复核失败用 `retract()` 追加作废清单，**不删库**，审计留痕。

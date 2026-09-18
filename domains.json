@@ -1,6 +1,6 @@
 {
-  "version": 2,
-  "note": "种子域库 + 落地配方卡。每个域包含触发模式、改写模板、陷阱、benchmark 指导，让 Agent 拿到热点就能直接决策，不用现场推理。",
+  "version": 1,
+  "note": "种子域库。只覆盖最常见场景，不求大而全。新域由 candidates.jsonl 蒸馏而来，每个用户的库随自己的负载生长。complete=true 表示该域证人在数学上完备（零一原理引子）。",
   "domains": [
     {
       "id": "str-join",
@@ -13,18 +13,7 @@
       },
       "complete": false,
       "rewrite_hint": "改为 ''.join(...) 一次成型；保留原有分隔符与尾部行为",
-      "min_speedup": 1.05,
-      "recipe": {
-        "trigger_patterns": [
-          "s = ''\nfor x in iter:\n    s += x",
-          "s = ''\nfor x in iter:\n    s = s + x",
-          "parts = []\nfor x in iter:\n    parts.append(x)\nreturn ''.join(parts)  # 已经是 join，但 parts 可改为生成器"
-        ],
-        "rewrite_template": "parts = []\nfor x in iter:\n    parts.append(x)\nreturn ''.join(parts)",
-        "pitfall": "小列表（<100项）时 += 可能更快（一次性分配开销）；分隔符逻辑要保留；尾部空串行为要一致",
-        "benchmark_min_n": 3,
-        "expected_speedup": "1.2x~3x（输入越大越接近上限，<100项可能倒退）"
-      }
+      "min_speedup": 1.05
     },
     {
       "id": "regex-precompile",
@@ -36,19 +25,7 @@
       },
       "complete": false,
       "rewrite_hint": "把 re.compile 提升到模块级常量；注意补充正例样本（随机串几乎不命中）",
-      "min_speedup": 1.05,
-      "recipe": {
-        "trigger_patterns": [
-          "def fn(...):\n    pattern = re.compile(r'...')\n    pattern.search(text)",
-          "for ...:\n    re.search(r'...', text)  # 循环内 re.search 也是",
-          "re.match(r'常量模式', s)  # 在循环/被调用函数内"
-        ],
-        "rewrite_template": "# 模块级\n_PATTERN = re.compile(r'...')\n\ndef fn(...):\n    return _PATTERN.search(text)",
-        "pitfall": "模式串依赖运行时参数（非字面量）不能提升；flags 参数要一起提取；re.search/re.match 也要提取为 compiled 对象",
-        "benchmark_min_n": 5,
-        "expected_speedup": "1.5x~5x（调用次数越多越明显，>100次调用才显著）",
-        "witness_note": "rand_str 证人几乎不命中，必须传 samples=真实数据"
-      }
+      "min_speedup": 1.05
     },
     {
       "id": "sort-small-net",
@@ -60,18 +37,7 @@
       },
       "complete": true,
       "rewrite_hint": "替换为认证最优网络；零一证人 2^n 完备，等价性在数学上成立",
-      "min_speedup": 1.02,
-      "recipe": {
-        "trigger_patterns": [
-          "nested if/elif 链做比较交换（固定 n<=8）",
-          "冒泡排序内联（小数组）",
-          "插入排序内联（小数组）"
-        ],
-        "rewrite_template": "# 根据 n 查最优网络表（参见 sort-small-net 域文档）\n# 例 n=3: if a>b: a,b=b,a; if a>c: a,c=c,a; if b>c: b,c=c,b",
-        "pitfall": "只适用于固定小 n（<=8）；n 可变时不要用；非比较排序（如基数排序）不在本域",
-        "benchmark_min_n": 1,
-        "expected_speedup": "1.02x~1.3x（n=3~5 时最明显，n>8 收益递减）"
-      }
+      "min_speedup": 1.02
     },
     {
       "id": "list-to-set-membership",
@@ -83,21 +49,7 @@
       },
       "complete": false,
       "rewrite_hint": "把列表转为 set 再做 in；注意保持元素顺序无关的语义",
-      "min_speedup": 1.05,
-      "recipe": {
-        "trigger_patterns": [
-          "for x in iter:\n    if x in my_list:  # my_list 在循环外定义且不变",
-          "if item in fixed_list:  # fixed_list 是模块级常量或函数入口处初始化"
-        ],
-        "rewrite_template": "lookup_set = set(fixed_list)\nfor x in iter:\n    if x in lookup_set:",
-        "pitfall": "列表元素必须可哈希；列表在循环内会变（append/remove）不能转 set；顺序敏感的检测（如找第一个匹配）不能改；空列表转 set 无意义",
-        "benchmark_min_n": 3,
-        "expected_speedup": "1.3x~10x（列表越长越明显，>100项时 O(1) vs O(n) 差距巨大）",
-        "suppress_patterns": [
-          "for x in list_literal:  # for 循环的 iter 是列表字面量，不是成员检测",
-          "if x in list_literal:  # 列表字面量只有少量元素，不值得转 set"
-        ]
-      }
+      "min_speedup": 1.05
     },
     {
       "id": "dict-dispatch",
@@ -110,16 +62,8 @@
       "complete": false,
       "rewrite_hint": "改为 dict.get(key, default) 查表；覆盖默认分支语义",
       "min_speedup": 1.02,
-      "recipe": {
-        "trigger_patterns": [
-          "if key == 'a':\n    ...\nelif key == 'b':\n    ...\nelif key == 'c':\n    ...  # 3+ 个 elif",
-          "if cmd == CMD_A: handler_a()\nelif cmd == CMD_B: handler_b()  # 命令分派"
-        ],
-        "rewrite_template": "DISPATCH = {\n    'a': handler_a,\n    'b': handler_b,\n    'c': handler_c,\n}\nresult = DISPATCH.get(key, default_handler)()",
-        "pitfall": "分支里有副作用（不只是返回值）不能简单替换；条件不是等值比较（如范围判断）不在本域；dict.get 的 default 要覆盖原 else 分支",
-        "benchmark_min_n": 3,
-        "expected_speedup": "1.1x~2x（分支越多越明显，>10 分支时 dict 查找优势显著）"
-      }
+      "caveat": "实测校准（跨代码库喂养 2026-08-18 + v2.1 复核）：本域在小字典上并非稳赢。键数≥4 或分支体为纯常量返回时优先用（实测 1.03–1.14x）。但：① ≤3 键且不少样本命中 default，或分支体含成员检测/f-string 拼接等真实计算时，dict 查表+lambda 开销反而更慢（实测 0.78–0.93x）；② **CPython 3.13+ 自适应特化后 elif 链已被优化得很好，重写普遍倒退**——v2.1 复核实测：elif→嵌套三元 0.896x、elif→dict.get 0.509x（get_greeting / get_os_name 两条旧记录已作废）。结论：3.13+ 环境下本域默认不值得重写；确要重写必须先跑 adopt 的 benchmark 双条件把关，别盲目套用。",
+      "version_sensitive": true
     },
     {
       "id": "lru-cache-pure",
@@ -131,23 +75,19 @@
       },
       "complete": false,
       "rewrite_hint": "加 functools.lru_cache；前提：函数确实纯净、输入可哈希",
-      "min_speedup": 1.1,
-      "recipe": {
-        "trigger_patterns": [
-          "def compute(x, y):\n    # 纯计算，无 I/O、无全局修改\n    return heavy_calc(x, y)\n\n# 在循环/递归中被重复调用\nfor i in range(1000):\n    compute(i, i+1)"
-        ],
-        "rewrite_template": "from functools import lru_cache\n\n@lru_cache(maxsize=None)\ndef compute(x, y):\n    return heavy_calc(x, y)",
-        "pitfall": "函数必须有副作用才能加（修改全局、I/O、随机数）；输入必须可哈希（list/dict 不能直接当参数）；maxsize 要根据调用模式设（None=全缓存，或设上限防内存爆炸）",
-        "benchmark_min_n": 5,
-        "expected_speedup": "2x~100x（重复调用越多越明显，纯计算函数第一次后几乎零成本）",
-        "purity_checklist": [
-          "不修改全局变量/类属性",
-          "不读写文件/网络/数据库",
-          "不调用 random/time/nonce",
-          "返回值只依赖参数",
-          "参数可哈希（int/str/tuple，不能是 list/dict/set）"
-        ]
-      }
+      "min_speedup": 1.1
+    },
+    {
+      "id": "io-parse-cache",
+      "name": "文件 I/O 解析缓存",
+      "scenario": "反复调用、输入为文件路径且文件内容在调用间不变时，每次都 open()+json.load() 重读重解析整个文件（如记忆库 store、配置、静态 JSON 数据）。",
+      "witness": {
+        "kind": "rand_str",
+        "n": 10
+      },
+      "complete": false,
+      "rewrite_hint": "首次读取后把解析结果缓存到内存 dict(按路径)，仅在显式 save/reload 后失效；等价性依赖'文件内容调用间不变'前提。必须传 samples=真实文件路径。",
+      "min_speedup": 1.2
     }
   ]
 }

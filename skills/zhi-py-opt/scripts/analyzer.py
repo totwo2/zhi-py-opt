@@ -190,16 +190,31 @@ def _scan_function(fn, filename, infer):
 # 向此列表追加自己的规则：
 #
 #   def my_rule(finding, fn, infer):
-#       """返回 'high' / 'low' 调整置信度；返回 None 表示抑制该发现。"""
+#       """返回 analyzer.SUPPRESS 抑制该发现；返回 'high'/'low' 覆盖置信度；None 不改动。"""
 #       # 例如：自家框架里 str-join 其实走的是特化累加器，统一抑制
 #       if finding["domain"] == "str-join" and "FrameworkBuf" in fn.name:
-#           return None
+#           return analyzer.SUPPRESS
 #       return None  # 不动
 #   analyzer.CONFIDENCE_RULES.append(my_rule)
 #
 # 规则签名：rule(finding: dict, fn: ast.FunctionDef, infer: dict) -> Optional[str]
-# 多个规则依次执行；任一返回 None 即抑制该发现；返回字符串则覆盖置信度。
+# 多个规则依次执行；返回 analyzer.SUPPRESS 即抑制该发现；返回字符串则覆盖置信度；
+# 返回 None 表示不改动(交给后续规则/保持原置信度)。注意: None≠抑制, 抑制必须返回 SUPPRESS。
 CONFIDENCE_RULES = []
+
+
+def _suppress_ast_dispatch(finding, fn, infer):
+    """AST 递归下降分派(_emit/_visit 类按节点类型 if-elif 链)是 dict-dispatch 的
+    反例: 每次调用的开销集中在节点处理(unparse/字符串构造), 分派只占零头,
+    dict 化无收益且破坏结构 → 抑制。通用模式, 不限于单一项目。"""
+    if finding["domain"] == "dict-dispatch" and any(
+        k in fn.name for k in ("_emit", "_visit", "visit_", "_handle_", "_dispatch")
+    ):
+        return SUPPRESS
+    return None
+
+
+CONFIDENCE_RULES.append(_suppress_ast_dispatch)
 
 
 def _apply_rules(findings, fn, infer):
