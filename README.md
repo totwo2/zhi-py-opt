@@ -2,6 +2,8 @@
 
 [中文](README.zh-CN.md) | English · current version **v2.1.0**
 
+> **This repo (`zhi-py-opt`) IS selfopt** — same project, one codebase. The SkillHub listing still uses the old pinyin slug.
+
 > Your agent rewrote a hot function and claims **1.5x faster**.
 > Who checked?
 >

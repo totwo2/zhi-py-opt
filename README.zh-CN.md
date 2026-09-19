@@ -1,4 +1,6 @@
-[English](README.md) | 中文
+[English](README.md) | 中文 · 当前版本 **v2.1.0**
+
+> **本仓库（`zhi-py-opt`）就是 selfopt** —— 同一项目、同一份代码。SkillHub 条目暂用旧拼音 slug。
 
 # selfopt — 给你的 AI 那句"这样更快"设一道闸门
 
